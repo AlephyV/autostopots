@@ -9,7 +9,6 @@ import customtkinter as ctk
 logger = logging.getLogger(__name__)
 
 CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
-
 MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]
 MAX_LOG_LINES = 500
 
@@ -23,60 +22,149 @@ class QueueLogHandler(logging.Handler):
 
     def emit(self, record):
         try:
-            msg = self.format(record)
-            self.log_queue.put(msg)
+            self.log_queue.put(self.format(record))
         except Exception:
             self.handleError(record)
 
 
+class LogWindow(ctk.CTkToplevel):
+    """Floating log viewer — always on top, hides on close instead of destroying."""
+
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Log — Auto-StopotS")
+        self.geometry("520x360")
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", self.withdraw)
+
+        ctk.CTkLabel(self, text="Log", font=("", 13, "bold")).pack(
+            anchor="w", padx=10, pady=(8, 4)
+        )
+        self._textbox = ctk.CTkTextbox(self, state="disabled", wrap="word")
+        self._textbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+    def append(self, msg: str) -> None:
+        self._textbox.configure(state="normal")
+        self._textbox.insert("end", msg + "\n")
+        line_count = int(self._textbox.index("end-1c").split(".")[0])
+        if line_count > MAX_LOG_LINES:
+            self._textbox.delete("1.0", f"{line_count - MAX_LOG_LINES + 1}.0")
+        self._textbox.configure(state="disabled")
+        self._textbox.see("end")
+
+    def show(self) -> None:
+        self.deiconify()
+        self.lift()
+        self.attributes("-topmost", True)
+
+
+class ControlPanel(ctk.CTkToplevel):
+    """Small floating control panel shown after the bot starts — always on top."""
+
+    def __init__(self, master, enabled_event: threading.Event, on_close):
+        super().__init__(master)
+        self.title("Auto-StopotS")
+        self.geometry("250x130")
+        self.resizable(False, False)
+        self.attributes("-topmost", True)
+        self.protocol("WM_DELETE_WINDOW", on_close)
+
+        self._enabled_event = enabled_event
+        self._log_window: LogWindow | None = None
+
+        self._build_ui()
+
+    def _build_ui(self):
+        self._status_label = ctk.CTkLabel(self, text="● Status: Ativo", anchor="w")
+        self._status_label.pack(fill="x", padx=14, pady=(14, 8))
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(0, 14))
+
+        self._toggle_var = ctk.StringVar(value="on")
+        self._toggle_switch = ctk.CTkSwitch(
+            row,
+            text="Ativar",
+            variable=self._toggle_var,
+            onvalue="on",
+            offvalue="off",
+            command=self._on_toggle,
+        )
+        self._toggle_switch.select()
+        self._toggle_switch.pack(side="left")
+
+        ctk.CTkButton(row, text="Log", width=55, command=self._on_log_click).pack(
+            side="right"
+        )
+
+    def _on_toggle(self):
+        if self._toggle_var.get() == "on":
+            self._enabled_event.set()
+            self._status_label.configure(text="● Status: Ativo")
+        else:
+            self._enabled_event.clear()
+            self._status_label.configure(text="● Status: Parado")
+
+    def _on_log_click(self):
+        if self._log_window is None or not self._log_window.winfo_exists():
+            self._log_window = LogWindow(self)
+        else:
+            self._log_window.show()
+
+    def append_log(self, msg: str) -> None:
+        if self._log_window and self._log_window.winfo_exists():
+            self._log_window.append(msg)
+
+    def deactivate(self) -> None:
+        """Force switch off — called on the main thread after a fatal API key error."""
+        self._enabled_event.clear()
+        self._toggle_var.set("off")
+        self._toggle_switch.deselect()
+        self._status_label.configure(text="● Status: Parado (erro de API Key)")
+
+
 class StopotSApp(ctk.CTk):
-    """Main GUI window for the Auto-StopotS bot."""
+    """
+    Entry-point window.
+
+    Shows the config form first. On start it hides itself and spawns
+    a floating ControlPanel that stays above the Playwright browser.
+    """
 
     def __init__(self):
         super().__init__()
-
-        self.title("Auto-StopotS")
-        self.geometry("520x560")
+        self.title("Auto-StopotS — Configuração")
+        self.geometry("420x230")
         self.resizable(False, False)
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        # Threading primitives
         self._enabled_event = threading.Event()
         self._shutdown_event = threading.Event()
         self._log_queue: queue.Queue[str] = queue.Queue()
         self._bot_thread: threading.Thread | None = None
+        self._control_panel: ControlPanel | None = None
 
-        # Setup logging
         self._setup_logging()
-
-        # Load existing config
         self._config = self._load_config()
-
-        # Build UI
-        self._build_config_frame()
-        self._build_control_frame()
-        self._build_log_frame()
-
-        # Start polling log queue
+        self._build_config_ui()
         self._poll_log_queue()
 
-        # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    # ── Logging setup ──────────────────────────────────────────────
+    # ── Logging ────────────────────────────────────────────────────
 
     def _setup_logging(self):
         handler = QueueLogHandler(self._log_queue)
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(message)s", datefmt="%H:%M:%S"
-        ))
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        root_logger.addHandler(handler)
+        handler.setFormatter(
+            logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S")
+        )
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+        root.addHandler(handler)
 
-    # ── Config ─────────────────────────────────────────────────────
+    # ── Config persistence ──────────────────────────────────────────
 
     @staticmethod
     def _load_config() -> dict:
@@ -85,102 +173,63 @@ class StopotSApp(ctk.CTk):
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
-    def _save_config(self):
-        api_key = self._api_key_entry.get().strip()
-        model = self._model_var.get()
-        config = {"openai_api_key": api_key, "model": model}
+    def _save_config(self) -> None:
+        config = {
+            "openai_api_key": self._api_key_entry.get().strip(),
+            "model": self._model_var.get(),
+        }
         CONFIG_PATH.write_text(json.dumps(config, indent=4), encoding="utf-8")
-        logger.info("Configurações salvas.")
 
-    # ── UI builders ────────────────────────────────────────────────
+    # ── Config UI ──────────────────────────────────────────────────
 
-    def _build_config_frame(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="x", padx=10, pady=(10, 5))
-
-        ctk.CTkLabel(frame, text="Configurações", font=("", 14, "bold")).pack(
-            anchor="w", padx=10, pady=(8, 4)
+    def _build_config_ui(self):
+        ctk.CTkLabel(self, text="Configurações", font=("", 14, "bold")).pack(
+            anchor="w", padx=16, pady=(14, 8)
         )
 
-        # API Key
-        row_key = ctk.CTkFrame(frame, fg_color="transparent")
-        row_key.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(row_key, text="API Key:").pack(side="left")
-        self._api_key_entry = ctk.CTkEntry(row_key, show="*", width=340)
-        self._api_key_entry.pack(side="left", padx=(8, 0))
+        row_key = ctk.CTkFrame(self, fg_color="transparent")
+        row_key.pack(fill="x", padx=16, pady=3)
+        ctk.CTkLabel(row_key, text="API Key:", width=68, anchor="w").pack(side="left")
+        self._api_key_entry = ctk.CTkEntry(row_key, show="*", width=290)
+        self._api_key_entry.pack(side="left", padx=(6, 0))
+        if self._config.get("openai_api_key"):
+            self._api_key_entry.insert(0, self._config["openai_api_key"])
+        self._api_key_entry.bind("<KeyRelease>", lambda _e: self._refresh_start_btn())
 
-        # Model
-        row_model = ctk.CTkFrame(frame, fg_color="transparent")
-        row_model.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(row_model, text="Modelo:").pack(side="left")
-        self._model_var = ctk.StringVar(
-            value=self._config.get("model", MODEL_OPTIONS[0])
-        )
+        row_model = ctk.CTkFrame(self, fg_color="transparent")
+        row_model.pack(fill="x", padx=16, pady=3)
+        ctk.CTkLabel(row_model, text="Modelo:", width=68, anchor="w").pack(side="left")
+        self._model_var = ctk.StringVar(value=self._config.get("model", MODEL_OPTIONS[0]))
         ctk.CTkOptionMenu(
             row_model, variable=self._model_var, values=MODEL_OPTIONS, width=200
-        ).pack(side="left", padx=(8, 0))
+        ).pack(side="left", padx=(6, 0))
 
-        # Save button
-        ctk.CTkButton(frame, text="Salvar Configurações", command=self._save_config).pack(
-            padx=10, pady=(6, 10)
+        self._start_btn = ctk.CTkButton(
+            self, text="Iniciar", command=self._on_start, width=160
         )
+        self._start_btn.pack(pady=(16, 0))
+        self._refresh_start_btn()
 
-    def _build_control_frame(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="x", padx=10, pady=5)
+    def _refresh_start_btn(self):
+        has_key = bool(self._api_key_entry.get().strip())
+        self._start_btn.configure(state="normal" if has_key else "disabled")
 
-        ctk.CTkLabel(frame, text="Controle", font=("", 14, "bold")).pack(
-            anchor="w", padx=10, pady=(8, 4)
-        )
+    # ── Start ──────────────────────────────────────────────────────
 
-        row = ctk.CTkFrame(frame, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=(0, 4))
-
-        self._start_btn = ctk.CTkButton(row, text="Começar", command=self._on_start_click)
-        self._start_btn.pack(side="left")
-
-        self._toggle_var = ctk.StringVar(value="off")
-        self._toggle_switch = ctk.CTkSwitch(
-            row,
-            text="Ativar",
-            variable=self._toggle_var,
-            onvalue="on",
-            offvalue="off",
-            command=self._on_toggle_change,
-        )
-        self._toggle_switch.pack(side="left", padx=(20, 0))
-        self._toggle_switch.configure(state="disabled")
-
-        self._status_label = ctk.CTkLabel(frame, text="Status: Parado")
-        self._status_label.pack(anchor="w", padx=10, pady=(0, 8))
-
-    def _build_log_frame(self):
-        frame = ctk.CTkFrame(self)
-        frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
-
-        ctk.CTkLabel(frame, text="Log", font=("", 14, "bold")).pack(
-            anchor="w", padx=10, pady=(8, 4)
-        )
-
-        self._log_textbox = ctk.CTkTextbox(frame, state="disabled", wrap="word")
-        self._log_textbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-
-    # ── Actions ────────────────────────────────────────────────────
-
-    def _on_start_click(self):
+    def _on_start(self):
         self._save_config()
-
-        self._start_btn.configure(state="disabled", text="Navegador aberto")
-        self._toggle_switch.configure(state="normal")
-
-        # Start with bot enabled
-        self._toggle_var.set("on")
-        self._toggle_switch.select()
         self._enabled_event.set()
-        self._status_label.configure(text="Status: Ativo")
+
+        # Open control panel at the same position as the config window
+        x, y = self.winfo_x(), self.winfo_y()
+        self._control_panel = ControlPanel(
+            master=self,
+            enabled_event=self._enabled_event,
+            on_close=self._on_close,
+        )
+        self._control_panel.geometry(f"250x130+{x}+{y}")
 
         from main import run_bot_thread
-
         self._bot_thread = threading.Thread(
             target=run_bot_thread,
             args=(self._enabled_event, self._shutdown_event, self._deactivate_bot),
@@ -188,23 +237,15 @@ class StopotSApp(ctk.CTk):
         )
         self._bot_thread.start()
 
+        self.withdraw()
+
+    # ── Callbacks ──────────────────────────────────────────────────
+
     def _deactivate_bot(self):
-        """Called from the bot thread on a fatal API key error — updates the GUI."""
-        self.after(0, self._apply_deactivated_state)
-
-    def _apply_deactivated_state(self):
-        self._enabled_event.clear()
-        self._toggle_var.set("off")
-        self._toggle_switch.deselect()
-        self._status_label.configure(text="Status: Parado (erro de API Key)")
-
-    def _on_toggle_change(self):
-        if self._toggle_var.get() == "on":
-            self._enabled_event.set()
-            self._status_label.configure(text="Status: Ativo")
-        else:
-            self._enabled_event.clear()
-            self._status_label.configure(text="Status: Parado")
+        def _apply():
+            if self._control_panel and self._control_panel.winfo_exists():
+                self._control_panel.deactivate()
+        self.after(0, _apply)
 
     def _on_close(self):
         self._shutdown_event.set()
@@ -220,20 +261,6 @@ class StopotSApp(ctk.CTk):
                 msg = self._log_queue.get_nowait()
             except queue.Empty:
                 break
-            self._log_textbox.configure(state="normal")
-            self._log_textbox.insert("end", msg + "\n")
-            self._log_textbox.configure(state="disabled")
-            self._log_textbox.see("end")
-
-        # Trim excess lines
-        self._trim_log()
-
+            if self._control_panel and self._control_panel.winfo_exists():
+                self._control_panel.append_log(msg)
         self.after(100, self._poll_log_queue)
-
-    def _trim_log(self):
-        self._log_textbox.configure(state="normal")
-        line_count = int(self._log_textbox.index("end-1c").split(".")[0])
-        if line_count > MAX_LOG_LINES:
-            excess = line_count - MAX_LOG_LINES
-            self._log_textbox.delete("1.0", f"{excess + 1}.0")
-        self._log_textbox.configure(state="disabled")

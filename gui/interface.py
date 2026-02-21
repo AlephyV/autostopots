@@ -258,16 +258,31 @@ class StopotSApp(ctk.CTk):
         import subprocess
         import sys
 
-        if not getattr(sys, "frozen", False):
-            # Development: use the venv's Python directly
-            cmd = [sys.executable, "-m", "playwright", "install", "chromium"]
-        else:
-            # Bundled .exe: use playwright's internal driver
+        is_frozen = getattr(sys, "frozen", False)
+
+        if is_frozen:
             from playwright._impl._driver import compute_driver_executable
             driver = str(compute_driver_executable())
-            cmd = ["cmd", "/c", driver, "install", "chromium"] if sys.platform == "win32" else [driver, "install", "chromium"]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if sys.platform == "win32":
+            # shell=True + quoted string handles .cmd drivers, UNC paths and spaces.
+            shell_cmd = (
+                f'"{driver}" install chromium'
+                if is_frozen
+                else f'"{sys.executable}" -m playwright install chromium'
+            )
+            proc = subprocess.run(
+                shell_cmd, shell=True, capture_output=True,
+                text=True, encoding="utf-8", errors="replace",
+            )
+        else:
+            cmd = (
+                [driver, "install", "chromium"]
+                if is_frozen
+                else [sys.executable, "-m", "playwright", "install", "chromium"]
+            )
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr or proc.stdout or "Erro ao instalar Chromium")
 

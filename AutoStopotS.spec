@@ -10,7 +10,7 @@ ctk_path = str(Path(customtkinter.__file__).parent)
 
 # Find the Chromium installed by `playwright install chromium`
 _local = os.environ.get("LOCALAPPDATA", "")
-_chromium_dirs = glob.glob(os.path.join(_local, "ms-playwright", "chromium-*", "chrome-win"))
+_chromium_dirs = glob.glob(os.path.join(_local, "ms-playwright", "chromium-*", "chrome-win*"))
 if not _chromium_dirs:
     raise SystemExit(
         "Chromium nao encontrado. Rode primeiro: playwright install chromium"

@@ -18,5 +18,6 @@ def get_chromium_executable() -> str | None:
     """
     if not getattr(sys, "frozen", False):
         return None
+    # chrome.exe lives directly under the bundled chromium/ dir regardless of original folder name
     path = Path(sys._MEIPASS) / "chromium" / "chrome.exe"
     return str(path) if path.exists() else None

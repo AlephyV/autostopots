@@ -1,17 +1,23 @@
+import glob
+import os
 from pathlib import Path
 import customtkinter
-import playwright
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
+
 ctk_path = str(Path(customtkinter.__file__).parent)
 
-# Playwright Python modules + hidden imports
-pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
+# Find the Chromium installed by `playwright install chromium`
+_local = os.environ.get("LOCALAPPDATA", "")
+_chromium_dirs = glob.glob(os.path.join(_local, "ms-playwright", "chromium-*", "chrome-win"))
+if not _chromium_dirs:
+    raise SystemExit(
+        "Chromium nao encontrado. Rode primeiro: playwright install chromium"
+    )
+chromium_src = _chromium_dirs[-1]  # use latest version
 
-# Playwright Node.js driver (node.exe + playwright CLI package).
-# Must be at playwright/driver/ so compute_driver_executable() finds it.
-pw_driver_src = str(Path(playwright.__file__).parent / "driver")
+pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
 
 a = Analysis(
     ["main.py"],
@@ -19,7 +25,7 @@ a = Analysis(
     binaries=pw_binaries,
     datas=[
         (ctk_path, "customtkinter"),
-        (pw_driver_src, "playwright/driver"),  # driver bundled explicitly
+        (chromium_src, "chromium"),   # bundled browser, no download needed
         *pw_datas,
     ],
     hiddenimports=[

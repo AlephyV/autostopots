@@ -9,3 +9,14 @@ else:
     _BASE_DIR = Path(__file__).resolve().parent.parent
 
 CONFIG_PATH = _BASE_DIR / "config.json"
+
+
+def get_chromium_executable() -> str | None:
+    """
+    In frozen mode: returns the path to the Chromium bundled inside the .exe.
+    In dev mode: returns None so Playwright uses its default installed browser.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    path = Path(sys._MEIPASS) / "chromium" / "chrome.exe"
+    return str(path) if path.exists() else None

@@ -133,7 +133,7 @@ class StopotSApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Auto-StopotS — Configuração")
-        self.geometry("420x255")
+        self.geometry("420x230")
         self.resizable(False, False)
 
         ctk.set_appearance_mode("dark")
@@ -206,11 +206,7 @@ class StopotSApp(ctk.CTk):
         self._start_btn = ctk.CTkButton(
             self, text="Iniciar", command=self._on_start, width=160
         )
-        self._start_btn.pack(pady=(16, 4))
-
-        self._status_label = ctk.CTkLabel(self, text="", text_color="#FF6B6B")
-        self._status_label.pack(pady=(0, 8))
-
+        self._start_btn.pack(pady=(16, 0))
         self._refresh_start_btn()
 
     def _refresh_start_btn(self):
@@ -221,70 +217,7 @@ class StopotSApp(ctk.CTk):
 
     def _on_start(self):
         self._save_config()
-        self._start_btn.configure(state="disabled", text="Verificando navegador...")
-        threading.Thread(target=self._ensure_browser_then_start, daemon=True).start()
-
-    def _ensure_browser_then_start(self):
-        try:
-            if not self._is_chromium_installed():
-                self.after(0, lambda: self._start_btn.configure(
-                    text="Baixando Chromium... (aguarde)"
-                ))
-            self._install_browser()
-        except Exception as e:
-            msg = str(e)
-            logger.error(f"Falha ao preparar navegador: {msg}")
-            self.after(0, lambda m=msg: self._on_browser_error(m))
-            return
-        self.after(0, self._launch_bot)
-
-    def _on_browser_error(self, msg: str):
-        self._start_btn.configure(state="normal", text="Iniciar")
-        self._status_label.configure(text=f"Erro: {msg[:60]}")
-
-    @staticmethod
-    def _is_chromium_installed() -> bool:
-        import glob
-        import os
-        from pathlib import Path
-        patterns = [
-            str(Path(os.environ.get("LOCALAPPDATA", "")) / "ms-playwright" / "chromium-*" / "chrome-win" / "chrome.exe"),
-            str(Path.home() / ".cache" / "ms-playwright" / "chromium-*" / "chrome-linux" / "chrome"),
-        ]
-        return any(glob.glob(p) for p in patterns)
-
-    @staticmethod
-    def _install_browser():
-        import subprocess
-        import sys
-
-        is_frozen = getattr(sys, "frozen", False)
-
-        if is_frozen:
-            from playwright._impl._driver import compute_driver_executable
-            driver = str(compute_driver_executable())
-
-        if sys.platform == "win32":
-            # shell=True + quoted string handles .cmd drivers, UNC paths and spaces.
-            shell_cmd = (
-                f'"{driver}" install chromium'
-                if is_frozen
-                else f'"{sys.executable}" -m playwright install chromium'
-            )
-            proc = subprocess.run(
-                shell_cmd, shell=True, capture_output=True,
-                text=True, encoding="utf-8", errors="replace",
-            )
-        else:
-            cmd = (
-                [driver, "install", "chromium"]
-                if is_frozen
-                else [sys.executable, "-m", "playwright", "install", "chromium"]
-            )
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr or proc.stdout or "Erro ao instalar Chromium")
+        self._launch_bot()
 
     def _launch_bot(self):
         self._enabled_event.set()

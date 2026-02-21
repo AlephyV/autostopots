@@ -13,6 +13,7 @@ from core.manipulator import (
     STOPOTS_URL,
 )
 from core.intelligence import generate_answers, InvalidAPIKeyError
+from core.config import get_chromium_executable
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,10 @@ class BotController:
     async def bot_loop(self):
         """Main bot loop: open browser, then wait for rounds and play."""
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=False)
+        launch_kwargs = {"headless": False}
+        if chromium_exe := get_chromium_executable():
+            launch_kwargs["executable_path"] = chromium_exe
+        self._browser = await self._playwright.chromium.launch(**launch_kwargs)
         context = await self._browser.new_context()
         self._page = await context.new_page()
 

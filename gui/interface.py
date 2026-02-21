@@ -2,13 +2,12 @@ import json
 import logging
 import queue
 import threading
-from pathlib import Path
 
 import customtkinter as ctk
 
-logger = logging.getLogger(__name__)
+from core.config import CONFIG_PATH
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
+logger = logging.getLogger(__name__)
 MODEL_OPTIONS = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]
 MAX_LOG_LINES = 500
 

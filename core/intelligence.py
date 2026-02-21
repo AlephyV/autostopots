@@ -1,16 +1,15 @@
 import json
 import logging
-from pathlib import Path
 
 from openai import AsyncOpenAI, AuthenticationError, RateLimitError
+
+from core.config import CONFIG_PATH
 
 logger = logging.getLogger(__name__)
 
 
 class InvalidAPIKeyError(Exception):
     """Raised when the API key is invalid or unauthorized."""
-
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.json"
 
 
 def load_config() -> dict:

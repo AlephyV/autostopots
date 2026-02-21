@@ -1,12 +1,17 @@
 from pathlib import Path
 import customtkinter
+import playwright
 from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 ctk_path = str(Path(customtkinter.__file__).parent)
 
-# collect_all includes Python code, data files (driver binaries) and hidden imports
+# Playwright Python modules + hidden imports
 pw_datas, pw_binaries, pw_hiddenimports = collect_all("playwright")
+
+# Playwright Node.js driver (node.exe + playwright CLI package).
+# Must be at playwright/driver/ so compute_driver_executable() finds it.
+pw_driver_src = str(Path(playwright.__file__).parent / "driver")
 
 a = Analysis(
     ["main.py"],
@@ -14,6 +19,7 @@ a = Analysis(
     binaries=pw_binaries,
     datas=[
         (ctk_path, "customtkinter"),
+        (pw_driver_src, "playwright/driver"),  # driver bundled explicitly
         *pw_datas,
     ],
     hiddenimports=[
@@ -41,7 +47,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
-    icon=None,  # coloque o caminho de um .ico aqui se quiser
+    icon=None,
 )
 
 coll = COLLECT(

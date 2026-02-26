@@ -1,5 +1,6 @@
 import json
 import logging
+import unicodedata
 
 from openai import AsyncOpenAI, AuthenticationError, RateLimitError
 
@@ -27,19 +28,31 @@ SYSTEM_PROMPT = (
     "for each category.\n"
     "Rules:\n"
     "- ALL answers MUST be in Brazilian Portuguese (pt-BR). "
-    "Think and reason in Portuguese — never think in English and translate.\n"
-    "- Every answer MUST start with the given letter (checked in pt-BR)\n"
-    "- Do NOT include leading articles (O, A, Os, As, Um, Uma) — write the main word directly. "
+    "To avoid translation mistakes, you MUST think and search for the word directly in Portuguese. "
+    "Never think of an English word and translate it (e.g., if the letter is 'G', do not think 'Green' -> 'Verde').\n"
+    "- Every final answer MUST start with the given letter. You must explicitly verify this in Portuguese.\n"
+    "- Do NOT include leading articles (O, A, Os, As, Um, Uma) - write the main word directly. "
     "WRONG: 'O Lobo de Wall Street'. CORRECT: 'Lobo de Wall Street'\n"
-    "- Max 20 characters per answer\n"
-    "- Respond ONLY with a JSON object mapping each category name to its answer, "
-    "no extra text"
+    "- Max 20 characters per answer.\n"
+    "- Respond ONLY with a valid JSON object using the exact structure below, with no extra text or markdown formatting outside the JSON:\n"
+    "{\n"
+    "  \"_reasoning\": \"Step-by-step thinking in Portuguese. For each category, pick a word, check if it is in pt-BR, and verify if the VERY FIRST LETTER matches the requested letter. If it doesn't match, pick another word.\",\n"
+    "  \"answers\": {\n"
+    "    \"Category1\": \"Word1\",\n"
+    "    \"Category2\": \"Word2\"\n"
+    "  }\n"
+    "}"
 )
 
 _PT_BR_ARTICLES = ("O ", "A ", "Os ", "As ", "Um ", "Uma ", "Uns ", "Umas ")
 
 DEFAULT_MODEL = "gpt-4o-mini"
 MAX_RETRIES = 1
+
+
+def _base_letter(char: str) -> str:
+    """Return the base ASCII letter, stripping any accent (e.g. 'Í' -> 'I')."""
+    return unicodedata.normalize("NFD", char).encode("ascii", "ignore").decode("ascii").upper()
 
 
 def _strip_leading_article(text: str) -> str:
@@ -71,7 +84,7 @@ def _parse_and_validate(raw: str, letter: str, categories: list[dict]) -> dict[s
     answers: dict[str, str] = {}
     upper_letter = letter.upper()
 
-    for name, answer in data.items():
+    for name, answer in data["answers"].items():
         input_id = name_to_id.get(name)
         if input_id is None:
             # Fuzzy match: AI may shorten or rephrase category names
@@ -90,7 +103,7 @@ def _parse_and_validate(raw: str, letter: str, categories: list[dict]) -> dict[s
         answer = str(answer).strip()
         answer = _strip_leading_article(answer)
 
-        if not answer.upper().startswith(upper_letter):
+        if _base_letter(answer[0]) != _base_letter(letter):
             logger.warning(
                 f"Resposta '{answer}' não começa com '{letter}' — descartada"
             )

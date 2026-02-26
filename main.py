@@ -114,9 +114,11 @@ class BotController:
             logger.error("IA não retornou respostas — rodada pulada.")
             return
 
+        id_to_name = {cat["input_id"]: cat["full_name"] for cat in categories}
         logger.info(f"Respostas geradas ({len(answers)}/{len(categories)}):")
         for input_id, answer in answers.items():
-            logger.info(f"    - #{input_id}: {answer}")
+            name = id_to_name.get(input_id, input_id)
+            logger.info(f"    - {name}: {answer}")
 
         if not self.enabled_event.is_set():
             logger.info("Bot desativado — pulando preenchimento.")
